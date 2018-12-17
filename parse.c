@@ -51,9 +51,6 @@ cmd *parse(char *line, bool pipe_in) {
             } else {
                 st = &c->in;
                 if (st->type != DEFAULT) {
-                    // BUG: this results in two error messages if this is not
-                    // the first command in the pipe chain, since we call
-                    // validate() with a non-null linked list head
                     fprintf(stderr, "invalid pipes and file redirection\n");
                     return NULL;
                 }
@@ -78,8 +75,11 @@ cmd *parse(char *line, bool pipe_in) {
         }
     }
 
-    if (*line != '\0')
+    if (*line != '\0') {
         c->next = parse(line, c->out.type == PIPE);
+        if (c->next == NULL)
+            return NULL;
+    }
 
     c->exe = c->exe->next; // skip dummy empty string
 
