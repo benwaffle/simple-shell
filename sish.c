@@ -40,6 +40,7 @@ int main(int argc, char *argv[]) {
     }
 
     signal(SIGINT, SIG_IGN);
+    setenv("SHELL", "/bin/sish", true);
 
     if (line) {
         cmd *c = parse(line, false);
