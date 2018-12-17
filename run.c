@@ -52,22 +52,23 @@ int run(cmd *c, bool tracing) {
         exit(0);
     } else {
         enum { READ = 0, WRITE = 1 };
-        int pipefd[2];
+        int pipefd[2] = {-1, -1};
         int exitstatus = 0;
         for (cmd *cur = c; cur; cur = cur->next) {
             int outfd = -1;
             int infd = -1;
-            int closefd[2] = {-1,-1}; // fds that need to be closed
+            int parent_close = -1;
+            int child_close = -1;
+
+            // We need to close the appropriate pipe fds in the shell process
+            // and first child because otherwise, one process won't get EOF
+            // when the other one has exited. Thus the need for
+            // {parent,child}_close, and calls to close() below.
 
             if (cur->in.type == PIPE) {
                 infd = pipefd[READ];
 
-                // we need to close the pipe in the shell process because
-                // otherwise, the reader won't get EOF when the writer has
-                // exited
                 close(pipefd[WRITE]);
-
-                closefd[0] = pipefd[WRITE];
             } else if (cur->in.type == A_FILE) {
                 if ((infd = open(cur->in.filename, O_RDONLY)) < 0) {
                     perror(cur->in.filename);
@@ -76,12 +77,15 @@ int run(cmd *c, bool tracing) {
             }
 
             if (cur->out.type == PIPE) {
+                parent_close = pipefd[READ]; // close the READ end after exec'ing the child
+
                 if (pipe(pipefd) == -1) {
                     perror("pipe");
                     break;
                 }
                 outfd = pipefd[WRITE];
-                closefd[1] = pipefd[READ];
+
+                child_close = pipefd[READ];
             } else if (cur->out.type == A_FILE || cur->out.type == APPEND_FILE) {
                 if ((outfd = open(cur->out.filename,
                                   O_WRONLY | O_CREAT | ((cur->out.type == APPEND_FILE) ? O_APPEND : 0),
@@ -99,17 +103,8 @@ int run(cmd *c, bool tracing) {
                 signal(SIGINT, SIG_DFL);
                 setpgid(0, c->pid == 0 ? getpid() : c->pid);
 
-                /*
-                printf("exec [%s]<%d >%d\n",
-                        cur->exe->str,
-                        infd == -1 ? STDIN_FILENO : infd,
-                        outfd == -1 ? STDOUT_FILENO : outfd);
-                */
-
-                if (closefd[0] != -1)
-                    close(closefd[0]);
-                if (closefd[1] != -1)
-                    close(closefd[1]);
+                if (child_close != -1)
+                    close(child_close);
 
                 if (outfd != -1)
                     if (dup2(outfd, STDOUT_FILENO) < -1)
@@ -136,6 +131,10 @@ int run(cmd *c, bool tracing) {
                         err(127, "%s", argv[0]);
                 }
             } else {
+                if (parent_close != -1) {
+                    close(parent_close);
+                }
+
                 setpgid(cur->pid, c->pid); // TODO: why?
 
                 if (cur == c) { // do this only for the first process
@@ -144,6 +143,9 @@ int run(cmd *c, bool tracing) {
                         perror("tcsetpgrp");
                 }
             }
+        }
+        if (pipefd[READ] != -1) {
+            close(pipefd[READ]);
         }
 
         for (cmd *cur = c; cur; cur = cur->next) {
