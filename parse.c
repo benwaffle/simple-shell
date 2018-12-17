@@ -1,5 +1,3 @@
-#include <stdio.h>
-
 #include "sish.h"
 
 cmd *parse(char *line, bool pipe_in) {
