@@ -164,6 +164,8 @@ bool validate(cmd *c) {
     return true;
 }
 
+int exit_status = 0;
+
 int run(cmd *c) {
     if (strcmp(c->exe->str, "cd") == 0) {
         if (c->exe->next == NULL) {
@@ -187,7 +189,20 @@ int run(cmd *c) {
             }
         }
     } else if (strcmp(c->exe->str, "echo") == 0) {
+        if (!c->exe->next) {
+            fprintf(stderr, "echo: missing argument\n");
+            return 1;
+        }
 
+        if (strcmp(c->exe->next->str, "$$") == 0) {
+            printf("%d\n", getpid());
+        } else if (strcmp(c->exe->next->str, "$?") == 0) {
+            printf("%d\n", exit_status);
+        } else {
+            printf("%s\n", c->exe->next->str);
+        }
+
+        return 0;
     } else if (strcmp(c->exe->str, "exit") == 0) {
         exit(0);
     } else {
@@ -212,6 +227,7 @@ int run(cmd *c) {
             int res;
             if (waitpid(pid, &res, 0) == -1)
                 perror("waitpid");
+            return WEXITSTATUS(res);
         }
     }
 
@@ -288,7 +304,7 @@ int main(int argc, char *argv[]) {
         cmd *c = parse(line, false);
         (void)c;
         if (validate(c))
-            run(c);
+            exit_status = run(c);
 
         free(line);
         line = NULL;
