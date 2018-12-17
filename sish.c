@@ -318,10 +318,14 @@ int run(cmd *c, bool tracing) {
                 for (args *arg = cur->exe; arg; arg = arg->next)
                     argv[i++] = arg->str;
                 argv[i] = NULL;
-                if (execvp(argv[0], argv) == -1)
+                if (execvp(argv[0], argv) == -1) {
                     // bash and sh exit with 127 if the command is not found or
                     // file is not executable
-                    err(127, "%s", argv[0]);
+                    if (errno == ENOENT)
+                        errx(127, "%s: command not found", argv[0]);
+                    else
+                        err(127, "%s", argv[0]);
+                }
             } else {
                 setpgid(cur->pid, c->pid); // TODO: why?
 
@@ -432,6 +436,8 @@ int main(int argc, char *argv[]) {
         free(line);
         line = NULL;
         capacity = 0;
+
+        errno = 0;
 
         printf("sish$ ");
     }
