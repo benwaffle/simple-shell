@@ -70,13 +70,15 @@ cmd *parse(char *line, bool pipe_in) {
 
         while (*line == ' ' || *line == '\t')
             ++line;
+
         if (*line == '<' || *line == '>') {
             stream *st;
             if (*line == '>') {
                 st = &c->out;
-                if (line[1] == '>')
+                if (line[1] == '>') {
                     st->type = APPEND_FILE;
-                else
+                    ++line;
+                } else
                     st->type = A_FILE;
             } else {
                 st = &c->in;
@@ -101,7 +103,8 @@ cmd *parse(char *line, bool pipe_in) {
         c->next = parse(line, c->out.type == PIPE);
 
     c->exe = c->exe->next; // skip dummy empty string
-    /*
+
+#if DEBUG
     int i = 0;
     for (cmd *cur = c; cur; ++i, cur = cur->next) {
         for (int j=0;j<i;++j)
@@ -143,7 +146,8 @@ cmd *parse(char *line, bool pipe_in) {
 
         printf(", bg=%d\n", cur->bg);
     }
-    */
+#endif
+
     return c;
 }
 
@@ -159,12 +163,12 @@ bool validate(cmd *c) {
             return false;
         }
 
-        if (cur->in.type == A_FILE && (!cur->in.filename || strlen(cur->in.filename) == 0)) {
+        if ((cur->in.type == A_FILE || cur->in.type == APPEND_FILE) && (!cur->in.filename || strlen(cur->in.filename) == 0)) {
             fprintf(stderr, "sish: missing input filename for `%s'\n", cur->exe->str);
             return false;
         }
 
-        if (cur->out.type == A_FILE && (!cur->out.filename || strlen(cur->out.filename) == 0)) {
+        if ((cur->out.type == A_FILE || cur->out.type == APPEND_FILE) && (!cur->out.filename || strlen(cur->out.filename) == 0)) {
             fprintf(stderr, "sish: missing output filename for `%s'\n", cur->exe->str);
             return false;
         }
@@ -248,8 +252,10 @@ int run(cmd *c) {
                 }
                 outfd = pipefd[WRITE];
                 closefd[1] = pipefd[READ];
-            } else if (cur->out.type == A_FILE) {
-                if ((outfd = open(cur->out.filename, O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)) < 0) {
+            } else if (cur->out.type == A_FILE || cur->out.type == APPEND_FILE) {
+                if ((outfd = open(cur->out.filename,
+                                  O_WRONLY | O_CREAT | ((cur->out.type == APPEND_FILE) ? O_APPEND : 0),
+                                  S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)) < 0) {
                     perror(cur->out.filename);
                     continue;
                 }
