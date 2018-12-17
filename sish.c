@@ -341,6 +341,7 @@ int main(int argc, char *argv[]) {
     line = NULL;
     capacity = 0;
     tracing = false;
+    (void)tracing; // TODO remove
 
     while ((ch = getopt(argc, argv, "c:x")) != -1) {
         switch (ch) {
