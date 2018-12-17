@@ -9,7 +9,7 @@
 #include <unistd.h>
 
 typedef struct {
-    enum { DEFAULT, PIPE, FILE, APPEND_FILE } type;
+    enum { DEFAULT, PIPE, A_FILE, APPEND_FILE } type;
     char *filename;
 } stream;
 
@@ -34,7 +34,7 @@ char *t[] = {
 };
 
 cmd *parse(char *line, bool pipe_in) {
-    printf("parsing [%s]\n", line);
+    // printf("parsing [%s]\n", line);
     cmd *c;
     size_t end;
     args *arg;
@@ -69,12 +69,12 @@ cmd *parse(char *line, bool pipe_in) {
             if (*line == '>') {
                 st = &c->out;
                 if (line[1] == '>')
-                    c->out.type = APPEND_FILE;
+                    st->type = APPEND_FILE;
                 else
-                    c->out.type = FILE;
+                    st->type = A_FILE;
             } else {
                 st = &c->in;
-                c->in.type = FILE;
+                st->type = A_FILE;
             }
 
             ++line;
@@ -112,8 +112,8 @@ cmd *parse(char *line, bool pipe_in) {
             case PIPE:
                 printf("<pipe");
                 break;
-            case FILE:
-                printf("<%s", c->in.filename);
+            case A_FILE:
+                printf("<%s", cur->in.filename);
                 break;
             case APPEND_FILE:
                 abort();
@@ -126,11 +126,11 @@ cmd *parse(char *line, bool pipe_in) {
             case PIPE:
                 printf(">pipe");
                 break;
-            case FILE:
-                printf(">%s", c->out.filename);
+            case A_FILE:
+                printf(">%s", cur->out.filename);
                 break;
             case APPEND_FILE:
-                printf(">>%s", c->out.filename);
+                printf(">>%s", cur->out.filename);
                 break;
         }
 
@@ -159,6 +159,7 @@ int main(int argc, char *argv[]) {
     capacity = 0;
     tracing = false;
 
+    /*
     parse("<asdf cat | wc -l", false);
     parse("wc -l <b", false);
     parse("echo $?", false);
@@ -173,6 +174,7 @@ int main(int argc, char *argv[]) {
     parse("exit", false);
     parse("cd /tmp", false);
     parse("pwd", false);
+    */
 
     while ((ch = getopt(argc, argv, "c:x")) != -1) {
         switch (ch) {
@@ -194,15 +196,13 @@ int main(int argc, char *argv[]) {
     printf("line = %s, tracing = %d\n", line, tracing);
     free(line);
 
-    return 0;
-
     printf("sish$ ");
 
     while ((len = getline(&line, &capacity, stdin)) != -1) {
         // remove newline, I don't want to deal with parsing it
         line[len - 1] = '\0';
 
-        printf("you wrote [%s] (len %zd)\n", line, len);
+        // printf("you wrote [%s] (len %zd)\n", line, len);
 
         cmd *c = parse(line, false);
         (void)c;
