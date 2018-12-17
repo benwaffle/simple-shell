@@ -281,10 +281,12 @@ int run(cmd *c) {
                 signal(SIGINT, SIG_DFL);
                 setpgid(0, c->pid == 0 ? getpid() : c->pid);
 
+                /*
                 printf("exec [%s]<%d >%d\n",
                         cur->exe->str,
                         infd == -1 ? STDIN_FILENO : infd,
                         outfd == -1 ? STDOUT_FILENO : outfd);
+                */
 
                 if (closefd[0] != -1)
                     close(closefd[0]);
@@ -340,12 +342,11 @@ int run(cmd *c) {
             else
                 err(1, "unknown exit condition %d", res);
 
-            printf("exit status of %s = %d\n", cur->exe->str, ret);
             if (!cur->next)
                 exitstatus = ret;
         }
 
-        // if we try to write or configure the terminal frmo the background
+        // if we try to configure the terminal frmo the background
         // process group, we get SIGTTOU, so ignore it
         signal(SIGTTOU, SIG_IGN);
         if (tcsetpgrp(STDOUT_FILENO, getpid()) == -1)
@@ -406,7 +407,13 @@ int main(int argc, char *argv[]) {
 
     printf("sish$ ");
 
-    while ((len = getline(&line, &capacity, stdin)) != -1) {
+    // getline forever, and restart on interrupt
+    while ((len = getline(&line, &capacity, stdin)) != -1 || errno == EINTR) {
+        if (errno == EINTR) {
+            errno = 0;
+            continue;
+        }
+
         // remove newline, I don't want to deal with parsing it
         line[len - 1] = '\0';
 
