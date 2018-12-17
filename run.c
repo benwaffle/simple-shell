@@ -1,6 +1,10 @@
 #include "sish.h"
 
 int run(cmd *c, bool tracing) {
+    bool bg;
+
+    bg = false;
+
     if (tracing) {
         for (cmd *cur = c; cur; cur = cur->next) {
             fprintf(stderr, "+ %s", cur->exe->str);
@@ -9,6 +13,9 @@ int run(cmd *c, bool tracing) {
             fprintf(stderr, "\n");
         }
     }
+
+    for (cmd *cur = c; cur; cur = cur->next)
+        bg = bg || cur->bg;
 
     if (strcmp(c->exe->str, "cd") == 0) {
         if (c->exe->next == NULL) {
@@ -137,45 +144,53 @@ int run(cmd *c, bool tracing) {
 
                 setpgid(cur->pid, c->pid); // race with child
 
-                if (cur == c) { // do this only for the first process
+                if (!bg && cur == c) { // do this only for the first process
                     // set the foreground process group for the controlling terminal so that signals are delivered
                     if (tcsetpgrp(STDOUT_FILENO, c->pid) == -1)
                         perror("tcsetpgrp");
                 }
+
+                if (bg) {
+                    // BUG: race condition with SIGCHLD handler, will cause issues if signal is delivered while this line is executing
+                    bgpids[n_bg++] = cur->pid;
+                }
             }
         }
+
         if (pipefd[READ] != -1) {
             close(pipefd[READ]);
         }
 
-        for (cmd *cur = c; cur; cur = cur->next) {
-            if (cur->pid == 0)
-                continue;
+        if (!bg) {
+            for (cmd *cur = c; cur; cur = cur->next) {
+                if (cur->pid == 0)
+                    continue;
 
-            int res;
-            if (waitpid(cur->pid, &res, 0) == -1) {
-                perror("waitpid");
-                continue;
+                int res;
+                if (waitpid(cur->pid, &res, 0) == -1) {
+                    perror("waitpid");
+                    continue;
+                }
+
+                int ret;
+                if (WIFEXITED(res))
+                    ret = WEXITSTATUS(res);
+                else if (WIFSIGNALED(res))
+                    ret = 0200 | WTERMSIG(res);
+                else
+                    err(1, "unknown exit condition %d", res);
+
+                if (!cur->next)
+                    exitstatus = ret;
             }
 
-            int ret;
-            if (WIFEXITED(res))
-                ret = WEXITSTATUS(res);
-            else if (WIFSIGNALED(res))
-                ret = 0200 | WTERMSIG(res);
-            else
-                err(1, "unknown exit condition %d", res);
-
-            if (!cur->next)
-                exitstatus = ret;
+            // if we try to configure the terminal frmo the background
+            // process group, we get SIGTTOU, so ignore it
+            signal(SIGTTOU, SIG_IGN);
+            if (tcsetpgrp(STDOUT_FILENO, getpid()) == -1)
+                perror("tcsetpgrp");
+            signal(SIGTTOU, SIG_DFL);
         }
-
-        // if we try to configure the terminal frmo the background
-        // process group, we get SIGTTOU, so ignore it
-        signal(SIGTTOU, SIG_IGN);
-        if (tcsetpgrp(STDOUT_FILENO, getpid()) == -1)
-            perror("tcsetpgrp");
-        signal(SIGTTOU, SIG_DFL);
 
         return exitstatus;
     }

@@ -2,6 +2,10 @@
 
 int exit_status = 0;
 
+pid_t bgpids[1024]; // 1024 should be a sufficiently large size for the number of
+                    // possible in-flight background processes
+int n_bg = 0;
+
 void usage() {
     fprintf(stderr,
             "Usage: %s [-x] [-c command]\n"
@@ -9,6 +13,18 @@ void usage() {
             "\t-c command    Execute the given command\n",
             getprogname());
     exit(1);
+}
+
+// TODO: can SIGCHLD be delivered while the handler is running?
+void sigchld() {
+    int dummy;
+
+    for (int i = 0; i < n_bg; ++i) {
+        if (waitpid(bgpids[i], &dummy, WNOHANG) == bgpids[i]) {
+            memmove(&bgpids[i], &bgpids[i+1], sizeof(bgpids[0]) * (n_bg - i - 1));
+            --n_bg;
+        }
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -40,6 +56,17 @@ int main(int argc, char *argv[]) {
     }
 
     signal(SIGINT, SIG_IGN);
+
+    sigset_t chld;
+    sigemptyset(&chld);
+    sigaddset(&chld, SIGCHLD);
+    sigaction(SIGCHLD, &(struct sigaction){
+        .sa_handler = sigchld,
+        .sa_mask = chld,
+        .sa_flags = SA_RESTART
+    }, NULL);
+
+    //signal(SIGCHLD, sigchld);
     setenv("SHELL", "/bin/sish", true);
 
     if (line) {

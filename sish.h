@@ -35,6 +35,8 @@ typedef struct cmd {
 } cmd;
 
 extern int exit_status;
+extern pid_t bgpids[1024];
+extern int n_bg;
 
 cmd *parse(char *, bool);
 bool validate(cmd *);
