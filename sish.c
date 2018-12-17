@@ -196,6 +196,8 @@ int main(int argc, char *argv[]) {
     printf("line = %s, tracing = %d\n", line, tracing);
     free(line);
 
+    signal(SIGINT, SIG_IGN);
+
     printf("sish$ ");
 
     while ((len = getline(&line, &capacity, stdin)) != -1) {
@@ -206,8 +208,8 @@ int main(int argc, char *argv[]) {
 
         cmd *c = parse(line, false);
         (void)c;
-        //validate(c);
-        //run(c);
+        // if (validate(c))
+        //     run(c);
 
         free(line);
         line = NULL;
