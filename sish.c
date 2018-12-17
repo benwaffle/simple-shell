@@ -76,4 +76,6 @@ int main(int argc, char *argv[]) {
 
     if (errno)
         perror("getline");
+
+    return exit_status;
 }
