@@ -1,5 +1,6 @@
 #include <sys/ioctl.h>
 
+#include <assert.h>
 #include <err.h>
 #include <errno.h>
 #include <stdbool.h>
@@ -139,6 +140,31 @@ cmd *parse(char *line, bool pipe_in) {
     return c;
 }
 
+bool validate(cmd *c) {
+    for (cmd *cur = c; cur; cur = cur->next) {
+        if (cur->out.type == PIPE && (!cur->next || cur->next->in.type != PIPE)) {
+            fprintf(stderr, "invalid pipes\n");
+            return false;
+        }
+
+        if (cur->in.type == A_FILE && (!cur->in.filename || strlen(cur->in.filename) == 0)) {
+            fprintf(stderr, "sish: missing input filename for `%s'\n", cur->exe->str);
+            return false;
+        }
+
+        if (cur->out.type == A_FILE && (!cur->out.filename || strlen(cur->out.filename) == 0)) {
+            fprintf(stderr, "sish: missing output filename for `%s'\n", cur->exe->str);
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void run(cmd *c) {
+    (void)c;
+}
+
 void usage() {
     fprintf(stderr,
             "Usage: %s [-x] [-c command]\n"
@@ -208,8 +234,8 @@ int main(int argc, char *argv[]) {
 
         cmd *c = parse(line, false);
         (void)c;
-        // if (validate(c))
-        //     run(c);
+        if (validate(c))
+            run(c);
 
         free(line);
         line = NULL;
