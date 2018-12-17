@@ -1,12 +1,18 @@
 #include "sish.h"
 
+void usage();
+void sigchld();
+int main(int, char **);
+
 int exit_status = 0;
 
-pid_t bgpids[1024]; // 1024 should be a sufficiently large size for the number of
-                    // possible in-flight background processes
+pid_t bgpids[1024]; // 1024 should be a sufficiently large size for the number
+                    // of possible in-flight background processes
 int n_bg = 0;
 
-void usage() {
+void
+usage()
+{
     fprintf(stderr,
             "Usage: %s [-x] [-c command]\n"
             "\t-x            Enable tracing mode\n"
@@ -16,19 +22,36 @@ void usage() {
 }
 
 // TODO: can SIGCHLD be delivered while the handler is running?
-void sigchld() {
-    int dummy;
+/**
+ * Handles SIGCHLD, to clean up zombie background processes
+ */
+void
+sigchld()
+{
+    int dummy, res;
 
     for (int i = 0; i < n_bg; ++i) {
-        if (waitpid(bgpids[i], &dummy, WNOHANG) == bgpids[i]) {
+        res = waitpid(bgpids[i], &dummy, WNOHANG);
+        if (res == bgpids[i]) {
             memmove(&bgpids[i], &bgpids[i+1], sizeof(bgpids[0]) * (n_bg - i - 1));
             --n_bg;
+        } else if (res == -1) {
+            perror("waitpid");
         }
     }
 }
 
-int main(int argc, char *argv[]) {
+/**
+ * sish: a very simple command-line interpreter or shell.  It is suitable to be
+ * used interactively or as a login shell.  It only implements a very small
+ * subset of what would usually be expected of a Unix shell, and does
+ * explicitly not lend itself as a scripting language.
+ */
+int
+main(int argc, char *argv[])
+{
     char *line;
+    cmd *c;
     ssize_t len;
     size_t capacity;
     int ch;
@@ -37,6 +60,8 @@ int main(int argc, char *argv[]) {
     line = NULL;
     capacity = 0;
     tracing = false;
+
+    setprogname(argv[0]);
 
     while ((ch = getopt(argc, argv, "c:x")) != -1) {
         switch (ch) {
@@ -55,19 +80,21 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    signal(SIGINT, SIG_IGN);
+    if (signal(SIGINT, SIG_IGN) == SIG_ERR)
+        err(1, "signal");
 
     sigset_t chld;
     sigemptyset(&chld);
     sigaddset(&chld, SIGCHLD);
-    sigaction(SIGCHLD, &(struct sigaction){
+    if (sigaction(SIGCHLD, &(struct sigaction){
         .sa_handler = sigchld,
         .sa_mask = chld,
         .sa_flags = SA_RESTART
-    }, NULL);
+    }, NULL) == -1)
+        err(1, "sigaction");
 
-    //signal(SIGCHLD, sigchld);
-    setenv("SHELL", "/bin/sish", true);
+    if (setenv("SHELL", "/bin/sish", true) == -1)
+        err(1, "setenv");
 
     if (line) {
         cmd *c = parse(line, false);
@@ -89,7 +116,7 @@ int main(int argc, char *argv[]) {
         // remove newline, I don't want to deal with parsing it
         line[len - 1] = '\0';
 
-        cmd *c = parse(line, false);
+        c = parse(line, false);
         if (c && validate(c))
             exit_status = run(c, tracing);
 

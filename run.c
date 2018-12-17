@@ -1,8 +1,24 @@
 #include "sish.h"
 
-int run(cmd *c, bool tracing) {
-    bool bg;
+int run(cmd *c, bool tracing);
 
+enum { READ = 0, WRITE = 1 }; // for pipes
+
+/**
+ * Executes the cmd `c', connecting pipes, handling signals, background
+ * processes, built-ins, and tracing.
+ */
+int
+run(cmd *c, bool tracing)
+{
+    bool bg;
+    char *home, **argv;
+    struct passwd *pw;
+    int pipefd[2];
+    int outfd, infd, parent_close, child_close, exitstatus, argc, i, res, ret;
+
+    outfd = infd = parent_close = child_close = pipefd[0] = pipefd[1] = -1;
+    exitstatus = argc = 0;
     bg = false;
 
     if (tracing) {
@@ -19,10 +35,8 @@ int run(cmd *c, bool tracing) {
 
     if (strcmp(c->exe->str, "cd") == 0) {
         if (c->exe->next == NULL) {
-            char *home = getenv("HOME");
-            if (!home) {
-                struct passwd *pw;
-
+            home = getenv("HOME");
+            if (home == NULL) {
                 if ((pw = getpwuid(getuid())) == NULL) {
                     perror("cd");
                     return 1;
@@ -40,8 +54,8 @@ int run(cmd *c, bool tracing) {
             }
             return 0;
         }
-    } else if (strcmp(c->exe->str, "echo") == 0 && !c->next) { // don't use this if we have pipes
-        if (!c->exe->next) {
+    } else if (strcmp(c->exe->str, "echo") == 0 && !c->next) {
+        if (c->exe->next == NULL) {
             fprintf(stderr, "echo: missing argument\n");
             return 1;
         }
@@ -58,14 +72,11 @@ int run(cmd *c, bool tracing) {
     } else if (strcmp(c->exe->str, "exit") == 0) {
         exit(0);
     } else {
-        enum { READ = 0, WRITE = 1 };
-        int pipefd[2] = {-1, -1};
-        int exitstatus = 0;
         for (cmd *cur = c; cur; cur = cur->next) {
-            int outfd = -1;
-            int infd = -1;
-            int parent_close = -1;
-            int child_close = -1;
+            outfd = -1;
+            infd = -1;
+            parent_close = -1;
+            child_close = -1;
 
             // We need to close the appropriate pipe fds in the shell process
             // and first child because otherwise, one process won't get EOF
@@ -84,7 +95,8 @@ int run(cmd *c, bool tracing) {
             }
 
             if (cur->out.type == PIPE) {
-                parent_close = pipefd[READ]; // close the READ end after exec'ing the child
+                // close the READ end after exec'ing the child
+                parent_close = pipefd[READ];
 
                 if (pipe(pipefd) == -1) {
                     perror("pipe");
@@ -107,8 +119,10 @@ int run(cmd *c, bool tracing) {
                 perror("fork");
                 return 1;
             } else if (cur->pid == 0) { // child
-                signal(SIGINT, SIG_DFL);
-                setpgid(0, c->pid == 0 ? getpid() : c->pid);
+                if (signal(SIGINT, SIG_DFL) == SIG_ERR)
+                    perror("signal");
+                if (setpgid(0, c->pid == 0 ? getpid() : c->pid) == -1)
+                    perror("setpgid");
 
                 if (child_close != -1)
                     close(child_close);
@@ -121,14 +135,19 @@ int run(cmd *c, bool tracing) {
                     if (dup2(infd, STDIN_FILENO) < -1)
                         perror("dup2");
 
-                int len = 0;
+                argc = 0;
                 for (args *arg = cur->exe; arg; arg = arg->next)
-                    ++len;
-                int i = 0;
-                char **argv = malloc(sizeof(char*) * len + 1);
+                    ++argc;
+
+                argv = malloc(sizeof(char*) * argc + 1);
+                if (argv == NULL)
+                    err(1, "malloc");
+
+                i = 0;
                 for (args *arg = cur->exe; arg; arg = arg->next)
                     argv[i++] = arg->str;
                 argv[i] = NULL;
+
                 if (execvp(argv[0], argv) == -1) {
                     // bash and sh exit with 127 if the command is not found or
                     // file is not executable
@@ -142,16 +161,20 @@ int run(cmd *c, bool tracing) {
                     close(parent_close);
                 }
 
-                setpgid(cur->pid, c->pid); // race with child
+                if (setpgid(cur->pid, c->pid) == -1) // race with child
+                    perror("setpgid");
 
                 if (!bg && cur == c) { // do this only for the first process
-                    // set the foreground process group for the controlling terminal so that signals are delivered
+                    // set the foreground process group for the controlling
+                    // terminal so that signals are delivered
                     if (tcsetpgrp(STDOUT_FILENO, c->pid) == -1)
                         perror("tcsetpgrp");
                 }
 
                 if (bg) {
-                    // BUG: race condition with SIGCHLD handler, will cause issues if signal is delivered while this line is executing
+                    // BUG: race condition with SIGCHLD handler, will cause
+                    // issues if signal is delivered while this line is
+                    // executing
                     bgpids[n_bg++] = cur->pid;
                 }
             }
@@ -166,13 +189,11 @@ int run(cmd *c, bool tracing) {
                 if (cur->pid == 0)
                     continue;
 
-                int res;
                 if (waitpid(cur->pid, &res, 0) == -1) {
                     perror("waitpid");
                     continue;
                 }
 
-                int ret;
                 if (WIFEXITED(res))
                     ret = WEXITSTATUS(res);
                 else if (WIFSIGNALED(res))
@@ -180,16 +201,20 @@ int run(cmd *c, bool tracing) {
                 else
                     err(1, "unknown exit condition %d", res);
 
-                if (!cur->next)
+                // the exit status for a pipe chain is the exit status of the
+                // last command
+                if (cur->next == NULL)
                     exitstatus = ret;
             }
 
             // if we try to configure the terminal frmo the background
             // process group, we get SIGTTOU, so ignore it
-            signal(SIGTTOU, SIG_IGN);
+            if (signal(SIGTTOU, SIG_IGN) == SIG_ERR)
+                perror("signal");
             if (tcsetpgrp(STDOUT_FILENO, getpid()) == -1)
                 perror("tcsetpgrp");
-            signal(SIGTTOU, SIG_DFL);
+            if (signal(SIGTTOU, SIG_DFL) == SIG_ERR)
+                perror("signal");
         }
 
         return exitstatus;

@@ -1,3 +1,6 @@
+#ifndef _SISH_H_
+#define _SISH_H_
+
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -15,9 +18,9 @@
 #include <string.h>
 #include <unistd.h>
 
-typedef struct {
-    enum { DEFAULT = 0, PIPE, A_FILE, APPEND_FILE } type;
+typedef struct stream {
     char *filename;
+    enum { DEFAULT = 0, PIPE, A_FILE, APPEND_FILE } type;
 } stream;
 
 typedef struct args {
@@ -26,9 +29,9 @@ typedef struct args {
 } args;
 
 typedef struct cmd {
-    args *exe;
-    stream out;
     stream in;
+    stream out;
+    args *exe;
     struct cmd *next;
     bool bg;
     pid_t pid;
@@ -41,3 +44,5 @@ extern int n_bg;
 cmd *parse(char *, bool);
 bool validate(cmd *);
 int run(cmd *, bool);
+
+#endif // !_SISH_H_
