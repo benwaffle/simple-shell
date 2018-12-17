@@ -33,7 +33,7 @@ int run(cmd *c, bool tracing) {
             }
             return 0;
         }
-    } else if (strcmp(c->exe->str, "echo") == 0) {
+    } else if (strcmp(c->exe->str, "echo") == 0 && !c->next) { // don't use this if we have pipes
         if (!c->exe->next) {
             fprintf(stderr, "echo: missing argument\n");
             return 1;
