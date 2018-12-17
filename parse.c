@@ -37,6 +37,11 @@ cmd *parse(char *line, bool pipe_in) {
             stream *st;
             if (*line == '>') {
                 st = &c->out;
+                if (st->type != DEFAULT) {
+                    fprintf(stderr, "duplicate file redirection\n");
+                    return NULL;
+                }
+
                 if (line[1] == '>') {
                     st->type = APPEND_FILE;
                     ++line;
