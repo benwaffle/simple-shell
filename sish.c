@@ -145,6 +145,11 @@ cmd *parse(char *line, bool pipe_in) {
 
 bool validate(cmd *c) {
     for (cmd *cur = c; cur; cur = cur->next) {
+        if (!cur->exe || strlen(cur->exe->str) == 0) {
+            fprintf(stderr, "missing command\n");
+            return false;
+        }
+
         if (cur->out.type == PIPE && (!cur->next || cur->next->in.type != PIPE)) {
             fprintf(stderr, "invalid pipes\n");
             return false;
