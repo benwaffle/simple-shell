@@ -1,0 +1,11 @@
+Bugs:
+- some race conditions could occur when receiving SIGCHLD
+- echo with variables doesn't work in a pipeline
+
+Test cases:
+- ls >out >out2
+- ls >>out >out
+- ls >out | cat
+- cat | ls <in
+- ls | ls &
+- I also used various other test cases to test pipes, more error handling, and background processes
