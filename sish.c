@@ -9,8 +9,8 @@
 #include <unistd.h>
 
 typedef struct {
-	enum { DEFAULT, PIPE, FILE, APPEND_FILE } type;	
-	char *filename;
+    enum { DEFAULT, PIPE, FILE, APPEND_FILE } type;
+    char *filename;
 } stream;
 
 typedef struct args {
@@ -19,9 +19,9 @@ typedef struct args {
 } args;
 
 typedef struct cmd {
-	args *exe;
-	stream out;
-	stream in;
+    args *exe;
+    stream out;
+    stream in;
     struct cmd *next;
     bool bg;
 } cmd;
@@ -52,7 +52,7 @@ cmd *parse(char *line, bool pipe_in) {
         end = strcspn(line, "<>|& \t");
         if (end > 0) {
             arg = c->exe;
-            while (arg && arg->next)
+            while (arg->next)
                 arg = arg->next;
             arg->next = calloc(sizeof(args), 1);
             arg->next->str = strndup(line, end);
@@ -139,10 +139,25 @@ cmd *parse(char *line, bool pipe_in) {
     return c;
 }
 
-int main() {
-    char *line = NULL;
+void usage() {
+    fprintf(stderr,
+            "Usage: %s [-x] [-c command]\n"
+            "\t-x            Enable tracing mode\n"
+            "\t-c command    Execute the given command\n",
+            getprogname());
+    exit(1);
+}
+
+int main(int argc, char *argv[]) {
+    char *line;
     ssize_t len;
-    size_t capacity = 0;
+    size_t capacity;
+    int ch;
+    bool tracing;
+
+    line = NULL;
+    capacity = 0;
+    tracing = false;
 
     parse("<asdf cat | wc -l", false);
     parse("wc -l <b", false);
@@ -159,6 +174,26 @@ int main() {
     parse("cd /tmp", false);
     parse("pwd", false);
 
+    while ((ch = getopt(argc, argv, "c:x")) != -1) {
+        switch (ch) {
+            case 'x':
+                tracing = true;
+                break;
+            case 'c':
+                if (optarg)
+                    line = strdup(optarg);
+                else
+                    usage();
+                break;
+            default:
+                usage();
+                break;
+        }
+    }
+
+    printf("line = %s, tracing = %d\n", line, tracing);
+    free(line);
+
     return 0;
 
     printf("sish$ ");
@@ -169,7 +204,10 @@ int main() {
 
         printf("you wrote [%s] (len %zd)\n", line, len);
 
-        parse(line, false);
+        cmd *c = parse(line, false);
+        (void)c;
+        //validate(c);
+        //run(c);
 
         free(line);
         line = NULL;
