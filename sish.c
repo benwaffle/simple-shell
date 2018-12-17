@@ -1,0 +1,183 @@
+#include <sys/ioctl.h>
+
+#include <err.h>
+#include <errno.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+typedef struct {
+	enum { DEFAULT, PIPE, FILE, APPEND_FILE } type;	
+	char *filename;
+} stream;
+
+typedef struct args {
+    struct args *next;
+    char *str;
+} args;
+
+typedef struct cmd {
+	args *exe;
+	stream out;
+	stream in;
+    struct cmd *next;
+    bool bg;
+} cmd;
+
+char *t[] = {
+    "std",
+    "pipe",
+    "file",
+    ">>file"
+};
+
+cmd *parse(char *line, bool pipe_in) {
+    printf("parsing [%s]\n", line);
+    cmd *c;
+    size_t end;
+    args *arg;
+
+    c = calloc(sizeof(cmd), 1);
+    c->exe = &(args){
+        .next = NULL,
+        .str = ""
+    };
+    end = 0;
+    if (pipe_in)
+        c->in.type = PIPE;
+
+    while (true) {
+        end = strcspn(line, "<>|& \t");
+        if (end > 0) {
+            arg = c->exe;
+            while (arg && arg->next)
+                arg = arg->next;
+            arg->next = calloc(sizeof(args), 1);
+            arg->next->str = strndup(line, end);
+            line += end;
+        }
+
+        if (*line == '\0')
+            break;
+
+        while (*line == ' ' || *line == '\t')
+            ++line;
+        if (*line == '<' || *line == '>') {
+            stream *st;
+            if (*line == '>') {
+                st = &c->out;
+                if (line[1] == '>')
+                    c->out.type = APPEND_FILE;
+                else
+                    c->out.type = FILE;
+            } else {
+                st = &c->in;
+                c->in.type = FILE;
+            }
+
+            ++line;
+            end = strcspn(line, "<>|& \t");
+            st->filename = strndup(line, end);
+            line += end;
+        } else if (*line == '|') {
+            c->out.type = PIPE;
+            line++;
+            break;
+        } else if (*line == '&') {
+            c->bg = true;
+            ++line;
+        }
+    }
+
+    if (*line != '\0')
+        c->next = parse(line, c->out.type == PIPE);
+
+    c->exe = c->exe->next; // skip dummy empty string
+    int i = 0;
+    for (cmd *cur = c; cur; ++i, cur = cur->next) {
+        for (int j=0;j<i;++j)
+            printf("\t");
+        printf("exe=[");
+        arg = cur->exe;
+        while (arg) {
+            printf("'%s', ", arg->str);
+            arg = arg->next;
+        }
+        printf("] ");
+        switch(cur->in.type) {
+            case DEFAULT:
+                break;
+            case PIPE:
+                printf("<pipe");
+                break;
+            case FILE:
+                printf("<%s", c->in.filename);
+                break;
+            case APPEND_FILE:
+                abort();
+                break;
+        }
+        printf(" ");
+        switch(cur->out.type) {
+            case DEFAULT:
+                break;
+            case PIPE:
+                printf(">pipe");
+                break;
+            case FILE:
+                printf(">%s", c->out.filename);
+                break;
+            case APPEND_FILE:
+                printf(">>%s", c->out.filename);
+                break;
+        }
+
+        printf(", bg=%d\n", cur->bg);
+    }
+    return c;
+}
+
+int main() {
+    char *line = NULL;
+    ssize_t len;
+    size_t capacity = 0;
+
+    parse("<asdf cat | wc -l", false);
+    parse("wc -l <b", false);
+    parse("echo $?", false);
+    parse("ls", false);
+    parse("ls | wc -l", false);
+    parse("echo $$", false);
+    parse("find / >/dev/null &", false);
+    parse("aed -e <file >file.enc", false);
+    parse("cmd | sort | uniq -c | sort -n", false);
+    parse("something", false);
+    parse("rm /etc/passwd", false);
+    parse("exit", false);
+    parse("cd /tmp", false);
+    parse("pwd", false);
+
+    return 0;
+
+    printf("sish$ ");
+
+    while ((len = getline(&line, &capacity, stdin)) != -1) {
+        // remove newline, I don't want to deal with parsing it
+        line[len - 1] = '\0';
+
+        printf("you wrote [%s] (len %zd)\n", line, len);
+
+        parse(line, false);
+
+        free(line);
+        line = NULL;
+        capacity = 0;
+
+        printf("sish$ ");
+    }
+
+    if (errno)
+        perror("getline");
+}

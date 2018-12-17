@@ -1,0 +1,4 @@
+sish
+*.o
+.DS_Store
+*~
