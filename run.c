@@ -135,7 +135,7 @@ int run(cmd *c, bool tracing) {
                     close(parent_close);
                 }
 
-                setpgid(cur->pid, c->pid); // TODO: why?
+                setpgid(cur->pid, c->pid); // race with child
 
                 if (cur == c) { // do this only for the first process
                     // set the foreground process group for the controlling terminal so that signals are delivered
