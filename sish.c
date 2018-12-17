@@ -18,7 +18,7 @@ usage()
             "\t-x            Enable tracing mode\n"
             "\t-c command    Execute the given command\n",
             getprogname());
-    exit(1);
+    exit(EXIT_FAILURE);
 }
 
 // TODO: can SIGCHLD be delivered while the handler is running?

@@ -70,7 +70,7 @@ run(cmd *c, bool tracing)
 
         return 0;
     } else if (strcmp(c->exe->str, "exit") == 0) {
-        exit(0);
+        exit(exit_status);
     } else {
         for (cmd *cur = c; cur; cur = cur->next) {
             outfd = -1;
