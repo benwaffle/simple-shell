@@ -289,6 +289,8 @@ int run(cmd *c) {
                     argv[i++] = arg->str;
                 argv[i] = NULL;
                 if (execvp(argv[0], argv) == -1)
+                    // bash and sh exit with 127 if the command is not found or
+                    // file is not executable
                     err(127, "%s", argv[0]);
             }
         }
