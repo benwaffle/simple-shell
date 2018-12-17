@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <err.h>
 #include <errno.h>
+#include <pwd.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -96,6 +97,7 @@ cmd *parse(char *line, bool pipe_in) {
         c->next = parse(line, c->out.type == PIPE);
 
     c->exe = c->exe->next; // skip dummy empty string
+    /*
     int i = 0;
     for (cmd *cur = c; cur; ++i, cur = cur->next) {
         for (int j=0;j<i;++j)
@@ -137,6 +139,7 @@ cmd *parse(char *line, bool pipe_in) {
 
         printf(", bg=%d\n", cur->bg);
     }
+    */
     return c;
 }
 
@@ -161,8 +164,58 @@ bool validate(cmd *c) {
     return true;
 }
 
-void run(cmd *c) {
-    (void)c;
+int run(cmd *c) {
+    if (strcmp(c->exe->str, "cd") == 0) {
+        if (c->exe->next == NULL) {
+            char *home = getenv("HOME");
+            if (!home) {
+                struct passwd *pw;
+
+                if ((pw = getpwuid(getuid())) == NULL) {
+                    perror("cd");
+                    return 1;
+                }
+            }
+            if (chdir(home) == -1) {
+                perror("cd");
+                return 1;
+            }
+        } else {
+            if (chdir(c->exe->next->str) == -1) {
+                perror("cd");
+                return 1;
+            }
+        }
+    } else if (strcmp(c->exe->str, "echo") == 0) {
+
+    } else if (strcmp(c->exe->str, "exit") == 0) {
+        exit(0);
+    } else {
+        pid_t pid = fork();
+        if (pid == -1) {
+            perror("fork");
+            return 1;
+        } else if (pid == 0) { // child
+            signal(SIGINT, SIG_DFL);
+
+            int len = 0;
+            for (args *arg = c->exe; arg; arg = arg->next)
+                ++len;
+            int i = 0;
+            char **argv = malloc(sizeof(char*) * len + 1);
+            for (args *arg = c->exe; arg; arg = arg->next)
+                argv[i++] = arg->str;
+            argv[i] = NULL;
+            if (execvp(argv[0], argv) == -1)
+                perror(argv[0]);
+        } else {
+            int res;
+            if (waitpid(pid, &res, 0) == -1)
+                perror("waitpid");
+        }
+    }
+
+    return 0;
 }
 
 void usage() {
