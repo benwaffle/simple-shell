@@ -191,7 +191,16 @@ bool validate(cmd *c) {
 
 int exit_status = 0;
 
-int run(cmd *c) {
+int run(cmd *c, bool tracing) {
+    if (tracing) {
+        for (cmd *cur = c; cur; cur = cur->next) {
+            fprintf(stderr, "+ %s", cur->exe->str);
+            for (args *arg = cur->exe->next; arg; arg = arg->next)
+                fprintf(stderr, " %s", arg->str);
+            fprintf(stderr, "\n");
+        }
+    }
+
     if (strcmp(c->exe->str, "cd") == 0) {
         if (c->exe->next == NULL) {
             char *home = getenv("HOME");
@@ -376,7 +385,6 @@ int main(int argc, char *argv[]) {
     line = NULL;
     capacity = 0;
     tracing = false;
-    (void)tracing; // TODO remove
 
     while ((ch = getopt(argc, argv, "c:x")) != -1) {
         switch (ch) {
@@ -400,7 +408,7 @@ int main(int argc, char *argv[]) {
     if (line) {
         cmd *c = parse(line, false);
         if (c && validate(c))
-            return run(c);
+            return run(c, tracing);
         else
             return 1;
     }
@@ -419,7 +427,7 @@ int main(int argc, char *argv[]) {
 
         cmd *c = parse(line, false);
         if (c && validate(c))
-            exit_status = run(c);
+            exit_status = run(c, tracing);
 
         free(line);
         line = NULL;
