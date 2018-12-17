@@ -1,9 +1,12 @@
 #include <sys/ioctl.h>
+#include <sys/wait.h>
 
 #include <assert.h>
 #include <err.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <pwd.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,6 +29,7 @@ typedef struct cmd {
     stream in;
     struct cmd *next;
     bool bg;
+    pid_t pid;
 } cmd;
 
 char *t[] = {
@@ -187,11 +191,13 @@ int run(cmd *c) {
                 perror("cd");
                 return 1;
             }
+            return 0;
         } else {
             if (chdir(c->exe->next->str) == -1) {
                 perror("cd");
                 return 1;
             }
+            return 0;
         }
     } else if (strcmp(c->exe->str, "echo") == 0) {
         if (!c->exe->next) {
@@ -211,32 +217,107 @@ int run(cmd *c) {
     } else if (strcmp(c->exe->str, "exit") == 0) {
         exit(0);
     } else {
-        pid_t pid = fork();
-        if (pid == -1) {
-            perror("fork");
-            return 1;
-        } else if (pid == 0) { // child
-            signal(SIGINT, SIG_DFL);
+        enum { READ = 0, WRITE = 1 };
+        int pipefd[2];
+        int exitstatus = 0;
+        for (cmd *cur = c; cur; cur = cur->next) {
+            int outfd = -1;
+            int infd = -1;
+            int closefd[2] = {-1,-1}; // fds that need to be closed
 
-            int len = 0;
-            for (args *arg = c->exe; arg; arg = arg->next)
-                ++len;
-            int i = 0;
-            char **argv = malloc(sizeof(char*) * len + 1);
-            for (args *arg = c->exe; arg; arg = arg->next)
-                argv[i++] = arg->str;
-            argv[i] = NULL;
-            if (execvp(argv[0], argv) == -1)
-                perror(argv[0]);
-        } else {
-            int res;
-            if (waitpid(pid, &res, 0) == -1)
-                perror("waitpid");
-            return WEXITSTATUS(res);
+            if (cur->in.type == PIPE) {
+                infd = pipefd[READ];
+
+                // we need to close the pipe in the shell process because
+                // otherwise, the reader won't get EOF when the writer has
+                // exited
+                close(pipefd[WRITE]);
+
+                closefd[0] = pipefd[WRITE];
+            } else if (cur->in.type == A_FILE) {
+                if ((infd = open(cur->in.filename, O_RDONLY)) < 0) {
+                    perror(cur->in.filename);
+                    continue;
+                }
+            }
+
+            if (cur->out.type == PIPE) {
+                if (pipe(pipefd) == -1) {
+                    perror("pipe");
+                    break;
+                }
+                outfd = pipefd[WRITE];
+                closefd[1] = pipefd[READ];
+            } else if (cur->out.type == A_FILE) {
+                if ((outfd = open(cur->out.filename, O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)) < 0) {
+                    perror(cur->out.filename);
+                    continue;
+                }
+            }
+
+            cur->pid = fork();
+            if (cur->pid == -1) {
+                perror("fork");
+                return 1;
+            } else if (cur->pid == 0) { // child
+                signal(SIGINT, SIG_DFL);
+
+                printf("exec [%s]<%d >%d\n",
+                        cur->exe->str,
+                        infd == -1 ? STDIN_FILENO : infd,
+                        outfd == -1 ? STDOUT_FILENO : outfd);
+
+                if (closefd[0] != -1)
+                    close(closefd[0]);
+                if (closefd[1] != -1)
+                    close(closefd[1]);
+
+                if (outfd != -1)
+                    if (dup2(outfd, STDOUT_FILENO) < -1)
+                        perror("dup2");
+
+                if (infd != -1)
+                    if (dup2(infd, STDIN_FILENO) < -1)
+                        perror("dup2");
+
+                int len = 0;
+                for (args *arg = cur->exe; arg; arg = arg->next)
+                    ++len;
+                int i = 0;
+                char **argv = malloc(sizeof(char*) * len + 1);
+                for (args *arg = cur->exe; arg; arg = arg->next)
+                    argv[i++] = arg->str;
+                argv[i] = NULL;
+                if (execvp(argv[0], argv) == -1)
+                    err(127, "%s", argv[0]);
+            }
         }
-    }
 
-    return 0;
+        for (cmd *cur = c; cur; cur = cur->next) {
+            if (cur->pid == 0)
+                continue;
+
+            int res;
+            if (waitpid(cur->pid, &res, 0) == -1) {
+                perror("waitpid");
+                continue;
+            }
+
+            int ret;
+            if (WIFEXITED(res))
+                ret = WEXITSTATUS(res);
+            else if (WIFSIGNALED(res))
+                ret = 0200 | WTERMSIG(res);
+            else
+                err(1, "unknown exit condition %d", res);
+
+            printf("exit status of %s = %d\n", cur->exe->str, ret);
+            if (!cur->next)
+                exitstatus = ret;
+        }
+
+        return exitstatus;
+    }
 }
 
 void usage() {
@@ -259,23 +340,6 @@ int main(int argc, char *argv[]) {
     capacity = 0;
     tracing = false;
 
-    /*
-    parse("<asdf cat | wc -l", false);
-    parse("wc -l <b", false);
-    parse("echo $?", false);
-    parse("ls", false);
-    parse("ls | wc -l", false);
-    parse("echo $$", false);
-    parse("find / >/dev/null &", false);
-    parse("aed -e <file >file.enc", false);
-    parse("cmd | sort | uniq -c | sort -n", false);
-    parse("something", false);
-    parse("rm /etc/passwd", false);
-    parse("exit", false);
-    parse("cd /tmp", false);
-    parse("pwd", false);
-    */
-
     while ((ch = getopt(argc, argv, "c:x")) != -1) {
         switch (ch) {
             case 'x':
@@ -293,10 +357,15 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    printf("line = %s, tracing = %d\n", line, tracing);
-    free(line);
-
     signal(SIGINT, SIG_IGN);
+
+    if (line) {
+        cmd *c = parse(line, false);
+        if (validate(c))
+            return run(c);
+        else
+            return 1;
+    }
 
     printf("sish$ ");
 
@@ -304,10 +373,7 @@ int main(int argc, char *argv[]) {
         // remove newline, I don't want to deal with parsing it
         line[len - 1] = '\0';
 
-        // printf("you wrote [%s] (len %zd)\n", line, len);
-
         cmd *c = parse(line, false);
-        (void)c;
         if (validate(c))
             exit_status = run(c);
 
