@@ -14,7 +14,7 @@
 #include <unistd.h>
 
 typedef struct {
-    enum { DEFAULT, PIPE, A_FILE, APPEND_FILE } type;
+    enum { DEFAULT = 0, PIPE, A_FILE, APPEND_FILE } type;
     char *filename;
 } stream;
 
@@ -78,10 +78,18 @@ cmd *parse(char *line, bool pipe_in) {
                 if (line[1] == '>') {
                     st->type = APPEND_FILE;
                     ++line;
-                } else
+                } else {
                     st->type = A_FILE;
+                }
             } else {
                 st = &c->in;
+                if (st->type != DEFAULT) {
+                    // BUG: this results in two error messages if this is not
+                    // the first command in the pipe chain, since we call
+                    // validate() with a non-null linked list head
+                    fprintf(stderr, "invalid pipes and file redirection\n");
+                    return NULL;
+                }
                 st->type = A_FILE;
             }
 
@@ -90,6 +98,10 @@ cmd *parse(char *line, bool pipe_in) {
             st->filename = strndup(line, end);
             line += end;
         } else if (*line == '|') {
+            if (c->out.type != DEFAULT) {
+                fprintf(stderr, "invalid pipes and file redirection\n");
+                return NULL;
+            }
             c->out.type = PIPE;
             line++;
             break;
@@ -370,7 +382,7 @@ int main(int argc, char *argv[]) {
 
     if (line) {
         cmd *c = parse(line, false);
-        if (validate(c))
+        if (c && validate(c))
             return run(c);
         else
             return 1;
@@ -383,7 +395,7 @@ int main(int argc, char *argv[]) {
         line[len - 1] = '\0';
 
         cmd *c = parse(line, false);
-        if (validate(c))
+        if (c && validate(c))
             exit_status = run(c);
 
         free(line);
