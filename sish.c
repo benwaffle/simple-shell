@@ -279,6 +279,7 @@ int run(cmd *c) {
                 return 1;
             } else if (cur->pid == 0) { // child
                 signal(SIGINT, SIG_DFL);
+                setpgid(0, c->pid == 0 ? getpid() : c->pid);
 
                 printf("exec [%s]<%d >%d\n",
                         cur->exe->str,
@@ -310,6 +311,14 @@ int run(cmd *c) {
                     // bash and sh exit with 127 if the command is not found or
                     // file is not executable
                     err(127, "%s", argv[0]);
+            } else {
+                setpgid(cur->pid, c->pid); // TODO: why?
+
+                if (cur == c) { // do this only for the first process
+                    // set the foreground process group for the controlling terminal so that signals are delivered
+                    if (tcsetpgrp(STDOUT_FILENO, c->pid) == -1)
+                        perror("tcsetpgrp");
+                }
             }
         }
 
@@ -335,6 +344,13 @@ int run(cmd *c) {
             if (!cur->next)
                 exitstatus = ret;
         }
+
+        // if we try to write or configure the terminal frmo the background
+        // process group, we get SIGTTOU, so ignore it
+        signal(SIGTTOU, SIG_IGN);
+        if (tcsetpgrp(STDOUT_FILENO, getpid()) == -1)
+            perror("tcsetpgrp");
+        signal(SIGTTOU, SIG_DFL);
 
         return exitstatus;
     }
